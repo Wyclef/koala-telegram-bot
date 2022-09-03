@@ -286,7 +286,7 @@ function generateListings(orders: IOrder[], answers: IAskResponse) {
       listings += tradeMethod.tradeMethodName + ', ';
     }
 
-    listings = listings.substring(1, listings.lastIndexOf(','));
+    listings = listings.substring(0, listings.lastIndexOf(','));
 
     listings +=  '\n\n';
   }

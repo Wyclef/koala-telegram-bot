@@ -8,12 +8,15 @@ const P2P_ENDPOINT = "https://p2p.binance.com";
 const P2P_ROW_REQUEST = 5;
 const DEFAULT_CRYPTO = "USDT";
 const DEFAULT_FIAT = "MMK";
-const DEFAULT_TRADE_TYPE = "Buy";
+
+const P2P_BUYERS = "BUYERS";
+const P2P_SELLERS = "SELLERS";
 
 const { Telegraf } = require('telegraf');
 const bot = new Telegraf(process.env.TELEGRAM_BOT_API_TOKEN);
 
 const REGEX_BUY_P2P_FILTER_COMMAND = new RegExp(/buyp2p_(.+)/i);
+const REGEX_SELL_P2P_FILTER_COMMAND = new RegExp(/sellp2p_(.+)/i);
 const REGEX_ALL_OTHER_COMMANDS = new RegExp(/./i);
 
 import {
@@ -25,7 +28,6 @@ import {
   IOrder,
 } from "./p2p";
 
-
 bot.command('start', ctx => {
   ctx.reply("Koala Overlord 🐨 welcomes you.");
 });
@@ -34,7 +36,7 @@ bot.command('buyp2p', async (ctx) => {
   const answers = {
     crypto: DEFAULT_CRYPTO,
     fiat: DEFAULT_FIAT,
-    tradeType: DEFAULT_TRADE_TYPE
+    tradeType: 'Buy'
   } as IAskResponse
 
   const sorted = await requestSortedBinanceP2POrders(answers);
@@ -44,7 +46,7 @@ bot.command('buyp2p', async (ctx) => {
     return;
   }
 
-  const reply_prefix = '🐨 5 Cheapest Binance P2P Ads 🐨\n\n';
+  const reply_prefix = `🐨 5 Cheapest Binance P2P ${P2P_SELLERS} 🐨\n\n`;
 
   ctx.reply(reply_prefix + generateListings(sorted, answers).toString(),
     {
@@ -65,18 +67,74 @@ bot.hears(REGEX_BUY_P2P_FILTER_COMMAND, async (ctx) => {
   const answers = {
     crypto: DEFAULT_CRYPTO,
     fiat: DEFAULT_FIAT,
-    tradeType: DEFAULT_TRADE_TYPE,
+    tradeType: 'Buy',
     transAmount: `${amount}`
-  } as IAskResponse  
+  } as IAskResponse
 
   const sorted = await requestSortedBinanceP2POrders(answers);
 
   if (sorted.length == 0) {
-    ctx.reply(`Sorry! No ads found for ${thousandSeparator(parseInt(amount))} ${DEFAULT_FIAT}.`);
+    ctx.reply(`Sorry! No ${P2P_SELLERS} found for ${thousandSeparator(parseInt(amount))} ${DEFAULT_FIAT}.`);
     return;
   }
 
-  const reply_prefix = `🐨 ${sorted.length} Binance P2P Ads For ${thousandSeparator(parseInt(amount))} ${DEFAULT_FIAT} 🐨\n\n`;
+  const reply_prefix = `🐨 ${sorted.length} Binance P2P ${P2P_SELLERS} For ${thousandSeparator(parseInt(amount))} ${DEFAULT_FIAT} 🐨\n\n`;
+
+  ctx.reply(reply_prefix + generateListings(sorted, answers).toString(),
+    {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    }
+  );
+});
+
+bot.command('sellp2p', async (ctx) => {
+  const answers = {
+    crypto: DEFAULT_CRYPTO,
+    fiat: DEFAULT_FIAT,
+    tradeType: 'Sell'
+  } as IAskResponse
+
+  const sorted = await requestSortedBinanceP2POrders(answers);
+
+  if (sorted.length == 0) {
+    ctx.reply(`Sorry! No one is buying ${DEFAULT_CRYPTO} at the moment.`);
+    return;
+  }
+
+  const reply_prefix = `🐨 5 Best Binance P2P ${P2P_BUYERS} 🐨\n\n`;
+
+  ctx.reply(reply_prefix + generateListings(sorted, answers).toString(),
+    {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    }
+  );
+})
+
+bot.hears(REGEX_SELL_P2P_FILTER_COMMAND, async (ctx) => {
+  let amount = ctx.message.text.substring(ctx.message.text.indexOf('_') + 1);
+
+  if (isNaN(amount)) {
+    ctx.reply('Please use the correct format. (e.g. "sellp2p_100000")');
+    return;
+  }
+
+  const answers = {
+    crypto: DEFAULT_CRYPTO,
+    fiat: DEFAULT_FIAT,
+    tradeType: 'Sell',
+    transAmount: `${amount}`
+  } as IAskResponse
+
+  const sorted = await requestSortedBinanceP2POrders(answers);
+
+  if (sorted.length == 0) {
+    ctx.reply(`Sorry! No ${P2P_BUYERS} found for ${thousandSeparator(parseInt(amount))} ${DEFAULT_FIAT}.`);
+    return;
+  }
+
+  const reply_prefix = `🐨 ${sorted.length} Binance P2P Buyers For ${thousandSeparator(parseInt(amount))} ${DEFAULT_FIAT} 🐨\n\n`;
 
   ctx.reply(reply_prefix + generateListings(sorted, answers).toString(),
     {
@@ -190,7 +248,12 @@ function thousandSeparator(number: number, fractionDigits: number = 0): string {
 function generateListings(orders: IOrder[], answers: IAskResponse) {
   let listings = '';
 
-  // const ascendPriceSorted = sortOrderWithPrice(orders);
+  orders = sortOrderWithPrice(orders);
+
+  if(answers.tradeType == 'Sell') {
+    orders = R.reverse(orders);
+  }
+  
   for (const order of orders) {
     // const monthOrderCount = order.advertiser.monthOrderCount;
     // const monthFinishRate = order.advertiser.monthFinishRate * 100;
@@ -207,7 +270,14 @@ function generateListings(orders: IOrder[], answers: IAskResponse) {
 
     listings += `Price ${answers.fiat}: ` + thousandSeparator(parseInt(price)) + '\n';
     listings += `Available ${answers.crypto}: ` + thousandSeparator(parseFloat(available), 2) + '\n';
-    listings += 'Seller: ' + `<a href='${P2P_ENDPOINT}/en/advertiserDetail?advertiserNo=${advertiserNo}'>` + 
+
+    if(answers.tradeType == 'Buy') {
+      listings += 'Seller: ';
+    } else {
+      listings += 'Buyer: ';
+    }
+
+    listings += `<a href='${P2P_ENDPOINT}/en/advertiserDetail?advertiserNo=${advertiserNo}'>` +
     `${nickNameWithUserType}</a>` + '\n\n';
   }
 

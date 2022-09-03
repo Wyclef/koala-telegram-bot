@@ -131,6 +131,7 @@ export interface ITradeMethods {
   payBank?: PayType;
   paySubBank?: string;
   identifier: string;
+  tradeMethodName: string;
 }
 
 export type UserType = "user" | "merchant";

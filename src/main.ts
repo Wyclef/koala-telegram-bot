@@ -12,6 +12,8 @@ const DEFAULT_FIAT = "MMK";
 const P2P_BUYERS = "BUYERS";
 const P2P_SELLERS = "SELLERS";
 
+const BRANDING_TEXT = "⚡ by https://t.me/TheKoalas";
+
 const { Telegraf } = require('telegraf');
 const bot = new Telegraf(process.env.TELEGRAM_BOT_API_TOKEN);
 
@@ -48,7 +50,7 @@ bot.command('buyp2p', async (ctx) => {
 
   const reply_prefix = `🐨 5 Best Binance P2P ${P2P_SELLERS} 🐨\n\n`;
 
-  ctx.reply(reply_prefix + generateListings(sorted, answers).toString(),
+  ctx.reply(reply_prefix + generateListings(sorted, answers).toString() + BRANDING_TEXT,
     {
       parse_mode: 'HTML',
       disable_web_page_preview: true
@@ -80,7 +82,7 @@ bot.hears(REGEX_BUY_P2P_FILTER_COMMAND, async (ctx) => {
 
   const reply_prefix = `🐨 ${sorted.length} Binance P2P ${P2P_SELLERS} For ${thousandSeparator(parseInt(amount))} ${DEFAULT_FIAT} 🐨\n\n`;
 
-  ctx.reply(reply_prefix + generateListings(sorted, answers).toString(),
+  ctx.reply(reply_prefix + generateListings(sorted, answers).toString() + BRANDING_TEXT,
     {
       parse_mode: 'HTML',
       disable_web_page_preview: true
@@ -104,7 +106,7 @@ bot.command('sellp2p', async (ctx) => {
 
   const reply_prefix = `🐨 5 Best Binance P2P ${P2P_BUYERS} 🐨\n\n`;
 
-  ctx.reply(reply_prefix + generateListings(sorted, answers).toString(),
+  ctx.reply(reply_prefix + generateListings(sorted, answers).toString() + BRANDING_TEXT,
     {
       parse_mode: 'HTML',
       disable_web_page_preview: true
@@ -136,7 +138,7 @@ bot.hears(REGEX_SELL_P2P_FILTER_COMMAND, async (ctx) => {
 
   const reply_prefix = `🐨 ${sorted.length} Binance P2P Buyers For ${thousandSeparator(parseInt(amount))} ${DEFAULT_FIAT} 🐨\n\n`;
 
-  ctx.reply(reply_prefix + generateListings(sorted, answers).toString(),
+  ctx.reply(reply_prefix + generateListings(sorted, answers).toString() + BRANDING_TEXT,
     {
       parse_mode: 'HTML',
       disable_web_page_preview: true
@@ -283,7 +285,8 @@ function generateListings(orders: IOrder[], answers: IAskResponse) {
     listings += 'Payments: ';
 
     for (const tradeMethod of order.adv.tradeMethods) {
-      listings += tradeMethod.tradeMethodName + ', ';
+      if (tradeMethod.tradeMethodName != null)
+        listings += tradeMethod.tradeMethodName + ', ';
     }
 
     listings = listings.substring(0, listings.lastIndexOf(','));

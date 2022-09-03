@@ -13,7 +13,7 @@ const DEFAULT_TRADE_TYPE = "Buy";
 const { Telegraf } = require('telegraf');
 const bot = new Telegraf(process.env.TELEGRAM_BOT_API_TOKEN);
 
-const REGEX_LIST_P2P_FILTER_COMMAND = new RegExp(/listp2p_(.+)/i);
+const REGEX_BUY_P2P_FILTER_COMMAND = new RegExp(/buyp2p_(.+)/i);
 const REGEX_ALL_OTHER_COMMANDS = new RegExp(/./i);
 
 import {
@@ -30,7 +30,7 @@ bot.command('start', ctx => {
   ctx.reply("Koala Overlord 🐨 welcomes you.");
 });
 
-bot.command('listp2p', async (ctx) => {
+bot.command('buyp2p', async (ctx) => {
   const answers = {
     crypto: DEFAULT_CRYPTO,
     fiat: DEFAULT_FIAT,
@@ -54,7 +54,7 @@ bot.command('listp2p', async (ctx) => {
   );
 })
 
-bot.hears(REGEX_LIST_P2P_FILTER_COMMAND, async (ctx) => {
+bot.hears(REGEX_BUY_P2P_FILTER_COMMAND, async (ctx) => {
   let amount = ctx.message.text.substring(ctx.message.text.indexOf('_') + 1);
 
   if (isNaN(amount)) {

@@ -1,17 +1,20 @@
-import * as inquirer from "inquirer";
-import * as chalk from "chalk";
+require('dotenv').config();
+
 import axios, { AxiosError, AxiosResponse } from "axios";
 import * as R from "ramda";
-// @ts-expect-error
-import * as Table from "cli-table";
-import * as logUpdate from "log-update";
 
-const DELAY_SECONDS = 3000;
+
 const P2P_ENDPOINT = "https://p2p.binance.com";
-const P2P_ROW_REQUEST = 20;
+const P2P_ROW_REQUEST = 5;
 const DEFAULT_CRYPTO = "USDT";
-const DEFAULT_FIAT = "THB";
+const DEFAULT_FIAT = "MMK";
 const DEFAULT_TRADE_TYPE = "Buy";
+
+const { Telegraf } = require('telegraf');
+const bot = new Telegraf(process.env.TELEGRAM_BOT_API_TOKEN);
+
+const REGEX_LIST_P2P_FILTER_COMMAND = new RegExp(/listp2p_(.+)/i);
+const REGEX_ALL_OTHER_COMMANDS = new RegExp(/./i);
 
 import {
   IPSPRequestOption,
@@ -21,48 +24,77 @@ import {
   IP2PResponse,
   IOrder,
 } from "./p2p";
-const log = console.log;
 
-function askCryptoQuestion(list: Crypto[]): inquirer.ListQuestionOptions {
-  const defaultCrypto = DEFAULT_CRYPTO || "USDT";
-  return {
-    type: "list",
-    name: "crypto",
-    message: `Select crypto (default '${defaultCrypto}')`,
-    choices: list,
-    default: defaultCrypto,
-  };
-}
 
-function askFiatQuestion(list: Fiat[]): inquirer.ListQuestionOptions {
-  const defaultFiat = DEFAULT_FIAT || "THB";
-  return {
-    type: "list",
-    name: "fiat",
-    message: `Select fiat (default '${defaultFiat}')`,
-    choices: list,
-    default: defaultFiat,
-  };
-}
+bot.command('start', ctx => {
+  ctx.reply("Koala Overlord 🐨 welcomes you.");
+});
 
-function askTradeTypeQuestion(list: TradeType[]): inquirer.ListQuestionOptions {
-  const defaultTradeType = DEFAULT_TRADE_TYPE || "Buy";
-  return {
-    type: "list",
-    name: "tradeType",
-    message: `Select exchange type (default: '${defaultTradeType}')`,
-    choices: list,
-    default: defaultTradeType || "Buy",
-  };
-}
+bot.command('listp2p', async (ctx) => {
+  const answers = {
+    crypto: DEFAULT_CRYPTO,
+    fiat: DEFAULT_FIAT,
+    tradeType: DEFAULT_TRADE_TYPE
+  } as IAskResponse
 
-function askTransAmountQuestion(): inquirer.ListQuestionOptions {
-  return {
-    type: "input",
-    name: "transAmount",
-    message: "Enter Amount",
-  };
-}
+  const sorted = await requestSortedBinanceP2POrders(answers);
+
+  if (sorted.length == 0) {
+    ctx.reply(`Sorry! No one is selling ${DEFAULT_CRYPTO} at the moment.`);
+    return;
+  }
+
+  const reply_prefix = '🐨 5 Cheapest Binance P2P Ads 🐨\n\n';
+
+  ctx.reply(reply_prefix + generateListings(sorted, answers).toString(),
+    {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    }
+  );
+})
+
+bot.hears(REGEX_LIST_P2P_FILTER_COMMAND, async (ctx) => {
+  let amount = ctx.message.text.substring(ctx.message.text.indexOf('_') + 1);
+
+  if (isNaN(amount)) {
+    ctx.reply('Please use the correct format. (e.g. "listp2p_100000")');
+    return;
+  }
+
+  const answers = {
+    crypto: DEFAULT_CRYPTO,
+    fiat: DEFAULT_FIAT,
+    tradeType: DEFAULT_TRADE_TYPE,
+    transAmount: `${amount}`
+  } as IAskResponse  
+
+  const sorted = await requestSortedBinanceP2POrders(answers);
+
+  if (sorted.length == 0) {
+    ctx.reply(`Sorry! No ads found for ${thousandSeparator(parseInt(amount))} ${DEFAULT_FIAT}.`);
+    return;
+  }
+
+  const reply_prefix = `🐨 ${sorted.length} Binance P2P Ads For ${thousandSeparator(parseInt(amount))} ${DEFAULT_FIAT} 🐨\n\n`;
+
+  ctx.reply(reply_prefix + generateListings(sorted, answers).toString(),
+    {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    }
+  );
+});
+
+bot.hears(REGEX_ALL_OTHER_COMMANDS, ctx => {
+  ctx.reply("Sorry, I don't understand that command yet.");
+});
+
+bot.launch();
+
+// Enable graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
 interface IAskResponse {
   crypto: Crypto;
@@ -71,84 +103,12 @@ interface IAskResponse {
   transAmount: string;
 }
 
-async function askQuestion(): Promise<IAskResponse> {
-  const crytoList: Crypto[] = ["USDT", "BTC", "BNB", "BUSD", "ETH", "DAI"];
-  const askCrypto = askCryptoQuestion(crytoList);
+async function requestSortedBinanceP2POrders(answers: IAskResponse): Promise<IOrder[]> {
+  const requestOptions = prepareP2POption(answers);
+  const p2pResponse = await requestP2P(requestOptions);
+  const orders = p2pResponse.data;
 
-  const fiatList: Fiat[] = [
-    "ARS",
-    "EUR",
-    "USD",
-    "AED",
-    "AUD",
-    "BDT",
-    "BHD",
-    "BOB",
-    "BRL",
-    "CAD",
-    "CLP",
-    "CNY",
-    "COP",
-    "CRC",
-    "CZK",
-    "DOP",
-    "DZD",
-    "EGP",
-    "GBP",
-    "GEL",
-    "GHS",
-    "HKD",
-    "IDR",
-    "INR",
-    "JPY",
-    "KES",
-    "KHR",
-    "KRW",
-    "KWD",
-    "KZT",
-    "LAK",
-    "LBP",
-    "LKR",
-    "MAD",
-    "MMK",
-    "MXN",
-    "MYR",
-    "NGN",
-    "OMR",
-    "PAB",
-    "PEN",
-    "PHP",
-    "PKR",
-    "PLN",
-    "PYG",
-    "QAR",
-    "RON",
-    "RUB",
-    "SAR",
-    "SDG",
-    "SEK",
-    "SGD",
-    "THB",
-    "TND",
-    "TRY",
-    "TWD",
-    "UAH",
-    "UGX",
-    "UYU",
-    "VES",
-    "VND",
-    "ZAR",
-  ];
-  const askFiat = askFiatQuestion(fiatList);
-
-  const tradeTypeList: TradeType[] = ["Buy", "Sell"];
-  const askTradeType = askTradeTypeQuestion(tradeTypeList);
-
-  const askTransAmount = askTransAmountQuestion();
-
-  const askList = [askCrypto, askFiat, askTradeType, askTransAmount];
-
-  return inquirer.prompt<IAskResponse>(askList);
+  return sortOrderWithPriceAndFinishRate(orders);
 }
 
 async function requestBinanceP2P(
@@ -191,7 +151,7 @@ function prepareP2POption(answers: IAskResponse): IPSPRequestOption {
     asset: answers.crypto,
     tradeType: answers.tradeType,
     fiat: answers.fiat,
-    transAmount: answers.transAmount,
+    transAmount: answers.transAmount
   };
   return options;
 }
@@ -219,35 +179,6 @@ export function sortOrderWithPrice(orders: IOrder[]): IOrder[] {
   return sorted;
 }
 
-function mapColor(orders: IOrder[]): Record<string, { color: string }> {
-  const ascendPriceColorMapped: Record<string, { color: string }> = {};
-
-  let colorCounter = 0;
-  for (let index = 0; index < orders.length; index++) {
-    const order: IOrder = orders[index];
-    if (!ascendPriceColorMapped[order.adv.price]) {
-      ascendPriceColorMapped[order.adv.price] = {
-        color: Colors[RateMapper[colorCounter]] || Colors.normal,
-      };
-      colorCounter++;
-    }
-  }
-  return ascendPriceColorMapped;
-}
-
-enum Colors {
-  best = "#00ff00",
-  good = "#ffff00",
-  medium = "#ffbf00",
-  normal = "#ffff",
-}
-
-const RateMapper = {
-  0: "best",
-  1: "good",
-  2: "medium",
-};
-
 function thousandSeparator(number: number, fractionDigits: number = 0): string {
   const defaultLocale = undefined;
   const formatted = number.toLocaleString(defaultLocale, {
@@ -256,96 +187,29 @@ function thousandSeparator(number: number, fractionDigits: number = 0): string {
   return formatted;
 }
 
-function generateTable(orders: IOrder[], answers: IAskResponse) {
-  const table = new Table({
-    chars: {
-      top: "",
-      "top-mid": "",
-      "top-left": "",
-      "top-right": "",
-      bottom: "",
-      "bottom-mid": "",
-      "bottom-left": "",
-      "bottom-right": "",
-      left: "",
-      "left-mid": "",
-      mid: "",
-      "mid-mid": "",
-      right: "",
-      "right-mid": "",
-      middle: " ",
-    },
-    style: { "padding-left": 0, "padding-right": 0 },
-    colWidths: [10, 12, 18, 8, 25, 95],
-    colAligns: ["left", "right", "right", "right", "left", "left"],
-    head: [
-      "Success",
-      `Price ${answers.fiat}`,
-      `Available ${answers.crypto}`,
-      "Order",
-      "Name",
-      "Link",
-    ],
-  });
+function generateListings(orders: IOrder[], answers: IAskResponse) {
+  let listings = '';
 
-  const ascendPriceSorted = sortOrderWithPrice(orders);
-  const ascendPriceColorMapped = mapColor(ascendPriceSorted);
+  // const ascendPriceSorted = sortOrderWithPrice(orders);
   for (const order of orders) {
-    const monthOrderCount = order.advertiser.monthOrderCount;
-    const monthFinishRate = order.advertiser.monthFinishRate * 100;
+    // const monthOrderCount = order.advertiser.monthOrderCount;
+    // const monthFinishRate = order.advertiser.monthFinishRate * 100;
     const nickName = order.advertiser.nickName;
     const price = order.adv.price;
     const advertiserNo = order.advertiser.userNo;
     const available = order.adv.surplusAmount;
-    const monthFinishRatePercent = `${monthFinishRate.toFixed(2)}%`;
+    // const monthFinishRatePercent = `${monthFinishRate.toFixed(2)}%`;
     const userType = order.advertiser.userType;
     const nickNameWithUserType =
     userType === "merchant"
-        ? `${nickName} ${chalk.hex(Colors.best)(` ${userType} `)}`
+        ? `${nickName} (${userType})`
         : nickName;
 
-    table.push([
-      monthFinishRate === 100
-        ? chalk.hex(Colors.best)(monthFinishRatePercent)
-        : monthFinishRatePercent,
-      chalk.hex(ascendPriceColorMapped[price].color)(price),
-      thousandSeparator(parseFloat(available), 2),
-      thousandSeparator(monthOrderCount),
-      nickNameWithUserType,
-      `${P2P_ENDPOINT}/en/advertiserDetail?advertiserNo=${advertiserNo}`,
-    ]);
+    listings += `Price ${answers.fiat}: ` + thousandSeparator(parseInt(price)) + '\n';
+    listings += `Available ${answers.crypto}: ` + thousandSeparator(parseFloat(available), 2) + '\n';
+    listings += 'Seller: ' + `<a href='${P2P_ENDPOINT}/en/advertiserDetail?advertiserNo=${advertiserNo}'>` + 
+    `${nickNameWithUserType}</a>` + '\n\n';
   }
 
-  return table;
+  return listings;
 }
-
-function setIntervalImmediately(func: Function, interval: number) {
-  func();
-  return setInterval(func, interval);
-}
-
-(async () => {
-  log(`💰  ${chalk.bold.underline(`P2P: BUY/SELL Questions\n`)}`);
-  const answers = await askQuestion();
-
-  log("\n");
-  log(`P2P: ${chalk.bold.underline(P2P_ENDPOINT)} \n`);
-
-  const run = async () => {
-    const requestOptions = prepareP2POption(answers);
-    const p2pResponse = await requestP2P(requestOptions);
-    const orders = p2pResponse.data;
-    const sorted = sortOrderWithPriceAndFinishRate(orders);
-    const table = generateTable(sorted, answers);
-
-    logUpdate(`DATE: ${chalk.bold.underline(
-      new Date().toLocaleString()
-    )}  (refresh ${DELAY_SECONDS / 1000}s)
-
-${table.toString()}
-
-`);
-  };
-
-  setIntervalImmediately(run, DELAY_SECONDS);
-})();

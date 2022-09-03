@@ -46,7 +46,7 @@ bot.command('buyp2p', async (ctx) => {
     return;
   }
 
-  const reply_prefix = `🐨 5 Cheapest Binance P2P ${P2P_SELLERS} 🐨\n\n`;
+  const reply_prefix = `🐨 5 Best Binance P2P ${P2P_SELLERS} 🐨\n\n`;
 
   ctx.reply(reply_prefix + generateListings(sorted, answers).toString(),
     {
@@ -278,7 +278,17 @@ function generateListings(orders: IOrder[], answers: IAskResponse) {
     }
 
     listings += `<a href='${P2P_ENDPOINT}/en/advertiserDetail?advertiserNo=${advertiserNo}'>` +
-    `${nickNameWithUserType}</a>` + '\n\n';
+    `${nickNameWithUserType}</a>` + '\n';
+
+    listings += 'Payments: ';
+
+    for (const tradeMethod of order.adv.tradeMethods) {
+      listings += tradeMethod.tradeMethodName + ', ';
+    }
+
+    listings = listings.substring(1, listings.lastIndexOf(','));
+
+    listings +=  '\n\n';
   }
 
   return listings;

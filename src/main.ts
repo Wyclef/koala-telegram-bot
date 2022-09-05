@@ -3,7 +3,6 @@ require('dotenv').config();
 import axios, { AxiosError, AxiosResponse } from "axios";
 import * as R from "ramda";
 
-
 const P2P_ENDPOINT = "https://p2p.binance.com";
 const P2P_ROW_REQUEST = 5;
 const DEFAULT_CRYPTO = "USDT";
@@ -20,6 +19,11 @@ const bot = new Telegraf(process.env.TELEGRAM_BOT_API_TOKEN);
 const REGEX_BUY_P2P_FILTER_COMMAND = new RegExp(/buyp2p_(.+)/i);
 const REGEX_SELL_P2P_FILTER_COMMAND = new RegExp(/sellp2p_(.+)/i);
 const REGEX_ALL_OTHER_COMMANDS = new RegExp(/./i);
+
+// Timer to look for arb opportunities
+let arbOpportunityInterval;
+let bobChatID;
+let lastArbOpportunity = '';
 
 import {
   IPSPRequestOption,
@@ -146,15 +150,122 @@ bot.hears(REGEX_SELL_P2P_FILTER_COMMAND, async (ctx) => {
   );
 });
 
+// Buys and sells are from the bot user's point of view.
+bot.command('arbsyko', async (ctx) => {
+  let arbOpportunity = await findArbOpportunity();
+
+  if (arbOpportunity != '') {
+    ctx.reply(arbOpportunity,
+      {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      }
+    );
+  }
+
+  ctx.reply("Sorry! There are no arbs.");
+});
+
+bot.command('arbsyko_start', ctx => {
+  if (arbOpportunityInterval != null) {
+    ctx.reply('Koala Overlord is already looking for arbs.');
+    return;
+  }
+
+  bobChatID = ctx.message.chat.id;
+
+  sendArbOpportunityToTelegram();
+
+  arbOpportunityInterval = setInterval(sendArbOpportunityToTelegram, 60000);
+
+  ctx.reply("Koala Overlord is looking for arbs every 60 seconds...");
+});
+
+bot.command('arbsyko_stop', ctx => {
+  if(arbOpportunityInterval == null) {
+    ctx.reply("Koala Overlord is not looking for arbs.");  
+    return;
+  }
+
+  clearInterval(arbOpportunityInterval);
+
+  arbOpportunityInterval = null;
+  lastArbOpportunity = '';
+
+  ctx.reply("Koala Overlord has stopped looking for arbs.");
+});
+
+async function sendArbOpportunityToTelegram() {
+  let arbOpportunity = await findArbOpportunity();
+
+  if (lastArbOpportunity != arbOpportunity) {
+    lastArbOpportunity = arbOpportunity;
+  } else {
+    return;
+  }
+
+  if (arbOpportunity != '') {
+    bot.telegram.sendMessage(bobChatID, arbOpportunity,
+      {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      }
+    );
+  }
+}
+
+async function findArbOpportunity() {
+  const buyAnswers = {
+    crypto: DEFAULT_CRYPTO,
+    fiat: DEFAULT_FIAT,
+    tradeType: 'Buy',    
+  } as IAskResponse
+
+  const sellAnswers = {
+    crypto: DEFAULT_CRYPTO,
+    fiat: DEFAULT_FIAT,
+    tradeType: 'Sell',    
+  } as IAskResponse
+
+  let buyOrders = await requestSortedBinanceP2POrders(buyAnswers);
+  let sellOrders = await requestSortedBinanceP2POrders(sellAnswers);
+
+  sellOrders = R.reverse(sellOrders);
+
+  let arbOpportunity = '';
+
+  if (buyOrders.length != 0 && sellOrders.length != 0) {
+    const lowestBuyOrder = buyOrders[0];
+    const highestSellorder = sellOrders[0];
+
+    const buyPrice = parseFloat(lowestBuyOrder.adv.price);
+    const sellPrice = parseFloat(highestSellorder.adv.price);
+
+    if(sellPrice > buyPrice) {    
+      const priceDifference = sellPrice - buyPrice;
+      const priceDifferencePercent = thousandSeparator((priceDifference / sellPrice) * 100, 2);
+
+      const buyListing = generateListing(lowestBuyOrder, buyAnswers);
+      const sellListing = generateListing(highestSellorder, sellAnswers);
+
+      arbOpportunity = `🐨 Arb Opportunity with ${priceDifferencePercent}% Profit 🐨`;
+
+      arbOpportunity += '\n\n';
+      arbOpportunity += '** BUY FROM THIS NOOB **\n'
+      arbOpportunity += buyListing + '\n\n';
+      arbOpportunity += '** SELL TO THIS SUCKER **\n'
+      arbOpportunity += sellListing;
+    }
+  }  
+
+  return arbOpportunity;
+}
+
 bot.hears(REGEX_ALL_OTHER_COMMANDS, ctx => {
   ctx.reply("Sorry, I don't understand that command yet.");
 });
 
 bot.launch();
-
-// Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
 interface IAskResponse {
   crypto: Crypto;
@@ -257,6 +368,14 @@ function generateListings(orders: IOrder[], answers: IAskResponse) {
   }
   
   for (const order of orders) {
+    listings += generateListing(order, answers);
+    listings +=  '\n\n';
+  }
+
+  return listings;
+}
+
+function generateListing(order: IOrder, answers: IAskResponse) {
     // const monthOrderCount = order.advertiser.monthOrderCount;
     // const monthFinishRate = order.advertiser.monthFinishRate * 100;
     const nickName = order.advertiser.nickName;
@@ -270,29 +389,40 @@ function generateListings(orders: IOrder[], answers: IAskResponse) {
         ? `${nickName} (${userType})`
         : nickName;
 
-    listings += `Price ${answers.fiat}: ` + thousandSeparator(parseInt(price)) + '\n';
-    listings += `Available ${answers.crypto}: ` + thousandSeparator(parseFloat(available), 2) + '\n';
+    let listing = '';
 
+    listing += `Price ${answers.fiat}: ` + thousandSeparator(parseInt(price)) + '\n';
+    listing += `Available ${answers.crypto}: ` + thousandSeparator(parseFloat(available), 2) + '\n';
+
+    // Buyers and Sellers labels are from the Binance P2P advertiser's point of view.
     if(answers.tradeType == 'Buy') {
-      listings += 'Seller: ';
+      listing += 'Seller: ';
     } else {
-      listings += 'Buyer: ';
+      listing += 'Buyer: ';
     }
 
-    listings += `<a href='${P2P_ENDPOINT}/en/advertiserDetail?advertiserNo=${advertiserNo}'>` +
+    listing += `<a href='${P2P_ENDPOINT}/en/advertiserDetail?advertiserNo=${advertiserNo}'>` +
     `${nickNameWithUserType}</a>` + '\n';
 
-    listings += 'Payments: ';
+    listing += 'Payments: ';
 
     for (const tradeMethod of order.adv.tradeMethods) {
       if (tradeMethod.tradeMethodName != null)
-        listings += tradeMethod.tradeMethodName + ', ';
+      listing += tradeMethod.tradeMethodName + ', ';
     }
 
-    listings = listings.substring(0, listings.lastIndexOf(','));
+    listing = listing.substring(0, listing.lastIndexOf(','));
 
-    listings +=  '\n\n';
-  }
-
-  return listings;
+    return listing;
 }
+
+// Enable graceful stop
+process.once('SIGINT', () => {
+  clearInterval(arbOpportunityInterval);
+  bot.stop('SIGINT');
+});
+
+process.once('SIGTERM', () => {
+  clearInterval(arbOpportunityInterval);
+  bot.stop('SIGTERM')
+});

@@ -161,6 +161,8 @@ bot.command('arbsyko', async (ctx) => {
         disable_web_page_preview: true
       }
     );
+
+    return;
   }
 
   ctx.reply("Sorry! There are no arbs.");

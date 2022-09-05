@@ -170,7 +170,7 @@ bot.command('arbsyko', async (ctx) => {
 
 bot.command('arbsyko_start', ctx => {
   if (arbOpportunityInterval != null) {
-    ctx.reply('Koala Overlord is already looking for arbs.');
+    ctx.reply('I\'m already looking for arbs.');
     return;
   }
 
@@ -180,12 +180,12 @@ bot.command('arbsyko_start', ctx => {
 
   arbOpportunityInterval = setInterval(sendArbOpportunityToTelegram, 60000);
 
-  ctx.reply("Koala Overlord is looking for arbs every 60 seconds...");
+  ctx.reply("I'm looking for arbs every 60 seconds...");
 });
 
 bot.command('arbsyko_stop', ctx => {
   if(arbOpportunityInterval == null) {
-    ctx.reply("Koala Overlord is not looking for arbs.");  
+    ctx.reply("I'm not looking for arbs.");  
     return;
   }
 
@@ -194,7 +194,7 @@ bot.command('arbsyko_stop', ctx => {
   arbOpportunityInterval = null;
   lastArbOpportunity = '';
 
-  ctx.reply("Koala Overlord has stopped looking for arbs.");
+  ctx.reply("I have stopped looking for arbs.");
 });
 
 async function sendArbOpportunityToTelegram() {
